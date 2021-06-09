@@ -1,0 +1,56 @@
+import torch
+import torch.nn.functional as F
+from torch import nn
+import numpy as np
+import pandas as pd
+import random
+import math
+
+
+class Attention(nn.Module):
+  def __init__(self, hidden_dim, num_heads):
+    super(Attention, self).__init__()
+    self.hidden_dim = hidden_dim
+    self.num_heads = num_heads
+    self.Q = nn.Linear(hidden_dim, 50)
+    self.K = nn.Linear(hidden_dim, 50)
+    self.V = nn.Linear(hidden_dim, 50)
+    self.out_1 = nn.Linear(50, hidden_dim)
+  def forward(self, x):
+
+    # x shape: (years, seqlen, batch, hiddendim)
+    q = self.Q(x)
+    k = self.K(x)
+    v = self.V(x)
+
+    q = self.split_heads(q)
+    k = self.split_heads(k)
+    v = self.split_heads(v)
+    dk = q.size()[-1] 
+    scores = torch.einsum('ysbh,tlbh -> bystl',[q,k])/math.sqrt(dk)
+
+    b = torch.ones(scores.shape[1], scores.shape[3])*-1e12
+    mask = torch.triu(b, diagonal=1).reshape(1,scores.shape[1],1,scores.shape[3],1).to(DEVICE)
+    scores +=mask
+    del b
+    del mask
+    
+    attention = F.softmax(scores, dim=-1)
+    y = torch.einsum('bystl,tlbh-> ysbh', [attention, v])
+    y = self.concat_heads(y)
+    y = self.out_1(y)
+
+    return y, attention
+
+  def split_heads(self, x):
+      years, seqlen, batch_size, hidden_dim = x.size()
+      head_size = hidden_dim // self.num_heads 
+      x = x.reshape(years, seqlen, batch_size, self.num_heads, head_size)
+      return x.reshape(years,seqlen, batch_size * self.num_heads, head_size)
+  
+  def concat_heads(self, x):
+      years, seq_len, batch_size_x_num_heads, hidden_dim = x.shape
+      batch_size = batch_size_x_num_heads // self.num_heads 
+      return x.reshape(years,seq_len, batch_size, self.num_heads, hidden_dim).reshape(years,seq_len, batch_size, 50) # out_dim 
+      
+      
